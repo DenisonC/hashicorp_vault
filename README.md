@@ -369,6 +369,169 @@ spec:
 
 Autenticação LDAP
 -------------------
+**A autenticação LDAP** usa o par nome de usuário/senha para obter um token de acesso. O nome de usuário é armazenado diretamente em um recurso **Kind=SecretStore** ou **Kind=ClusterSecretStore**, a senha é armazenada em um Kind=Secret referenciado por **secretRef**.
+```ruby
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: vault-backend
+  namespace: example
+spec:
+  provider:
+    vault:
+      server: "https://vault.acme.org"
+      path: "secret"
+      version: "v2"
+      auth:
+        # VaultLdap authenticates with Vault using the LDAP auth mechanism
+        # https://www.vaultproject.io/docs/auth/ldap
+        ldap:
+          # Path where the LDAP authentication backend is mounted
+          path: "ldap"
+          # LDAP username
+          username: "username"
+          secretRef:
+            name: "my-secret"
+            key: "ldap-password"
+```
+**NOTA**: No caso de um **ClusterSecretStore**, certifique-se de fornecer **namespace** em **secretRef** com o namespace onde o segredo reside.
+
+Autenticação JWT/OIDC
+-------------------------
+
+**JWT/OIDC** usa um token **JWT** armazenado em um **Kind=Secret** e referenciado pelo **secretRef** ou um token de conta de serviço Kubernetes temporário recuperado por meio da API **TokenRequest**. Opcionalmente, um campo de função pode ser definido em um recurso **Kind=SecretStore** ou **Kind=ClusterSecretStore**.
+```ruby
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: vault-backend
+  namespace: example
+spec:
+  provider:
+    vault:
+      server: "https://vault.acme.org"
+      path: "secret"
+      version: "v2"
+      auth:
+        # VaultJwt authenticates with Vault using the JWT/OIDC auth mechanism
+        # https://www.vaultproject.io/docs/auth/jwt
+        jwt:
+          # Path where the JWT authentication backend is mounted
+          path: "jwt"
+          # JWT role configured in a Vault server, optional.
+          role: "vault-jwt-role"
+
+          # Retrieve JWT token from a Kubernetes secret
+          secretRef:
+            name: "my-secret"
+            key: "jwt-token"
+
+          # ... or retrieve a Kubernetes service account token via the `TokenRequest` API
+          kubernetesServiceAccountToken:
+            serviceAccountRef:
+              name: "my-sa"
+            # `audiences` defaults to `["vault"]` it not supplied
+            audiences:
+            - vault
+            # `expirationSeconds` defaults to 10 minutes if not supplied
+            expirationSeconds: 600
+```
+**NOTA**: No caso de um **ClusterSecretStore**, certifique-se de fornecer **namespace** em secretRef com o namespace onde o segredo reside.
+
+PushSecret
+------------
+
+O Vault oferece suporte aos recursos do PushSecret, que permitem sincronizar uma determinada chave secreta do kubernetes em um segredo do cofre hashicorp. Para isso, espera-se que a chave secreta seja um objeto JSON válido.
+
+Para usar o PushSecret, você precisa conceder permissões de criação, leitura e atualização para o caminho para o qual deseja enviar os segredos. Use-o com cuidado!
+
+Aqui está um exemplo de como configurá-lo:
+```ruby
+apiVersion: v1
+kind: Secret
+metadata:
+  name: source-secret
+  namespace: default
+stringData:
+  source-key: "{\"foo\":\"bar\"}" # Needs to be a JSON
+---
+apiVersion: external-secrets.io/v1alpha1
+kind: PushSecret
+metadata:
+  name: pushsecret-example
+  namespace: default
+spec:
+  refreshInterval: 10s # Refresh interval for which push secret will reconcile
+  secretStoreRefs: # A list of secret stores to push secrets to
+    - name: vault-secretstore
+      kind: SecretStore
+  selector:
+    secret:
+      name: source-secret # Source Kubernetes secret to be pushed
+  data:
+    - match:
+        secretKey: source-key # Source Kubernetes secret key containing the vault secret (in JSON format)
+        remoteRef:
+          remoteKey: vault/secret # path to vault secret. This path is appended with the vault-store path.
+```
+
+Vault Enterprise
+---------------------
+
+**Nós de Standby de Desempenho e Consistência Eventuais**
+
+Ao usar o Vault Enterprise com nós de espera de desempenho, qualquer seguidor pode lidar com solicitações de leitura imediatamente após a autenticação do provedor. Como o Vault se torna eventualmente consistente nesse modo, essas solicitações podem falhar se o login ainda não tiver se propagado para o estado local de cada servidor.
+
+Abaixo estão duas soluções diferentes para este cenário. Você precisará revisá-los e escolher o mais adequado para seu ambiente e configuração do Vault.
+
+Namespaces do Vault
+--------------------
+
+Os **namespaces do Vault** são um recurso empresarial compatível com multilocação. Você pode especificar um namespace de cofre usando a propriedade **namespace** ao definir um SecretStore:
+```ruby
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: vault-backend
+spec:
+  provider:
+    vault:
+      server: "http://my.vault.server:8200"
+      # See https://www.vaultproject.io/docs/enterprise/namespaces
+      namespace: "ns1"
+      path: "secret"
+      version: "v2"
+      auth:
+        # ...
+```
+Leia seus escritos
+-----------------
+
+O Vault 1.10.0 e posterior codifica informações no token para detectar o caso em que um servidor está atrasado. Se um servidor do Vault não tiver informações sobre o token fornecido, o Vault retornará um erro 412 para que os clientes saibam que devem tentar novamente.
+
+Um método suportado nas versões Vault 1.7 e posteriores é utilizar o cabeçalho X-Vault-Index retornado em todas as solicitações de gravação (incluindo logins). Repassar esse cabeçalho nas solicitações subsequentes instrui o cliente do Vault a repetir a solicitação até que o servidor tenha um índice maior ou igual ao retornado com a última gravação. Obviamente, porém, isso tem um impacto no desempenho porque a leitura é bloqueada até que o estado local do seguidor seja atualizado.
+
+Encaminhamento inconsistente
+--------------------------
+
+O Vault também oferece suporte ao proxy de solicitações inconsistentes para o líder do cluster atual para consistência imediata de leitura após gravação.
+
+O Vault 1.10.0 e posterior oferece suporte a uma configuração de replicação que detecta quando o encaminhamento deve ocorrer e o faz de forma transparente para o cliente.
+
+No Vault 1.7, o encaminhamento pode ser obtido definindo o cabeçalho **X-Vault-Inconsistent** para **forward-active-node**. Por padrão, esse comportamento está desabilitado e deve ser habilitado explicitamente na configuração de replicação do servidor.
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
