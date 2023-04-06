@@ -265,7 +265,110 @@ Oferecemos suporte a cinco modos diferentes de autenticação: **baseado em toke
 Autenticação baseada em token
 ----------------------------
 
+Um token estático é armazenado em um **Kind=Secret** e é usado para autenticar com o cofre.
 
+```ruby
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: vault-backend
+  namespace: example
+spec:
+  provider:
+    vault:
+      server: "https://vault.acme.org"
+      path: "secret"
+      version: "v2"
+      auth:
+        # points to a secret that contains a vault token
+        # https://www.vaultproject.io/docs/auth/token
+        tokenSecretRef:
+          name: "my-secret"
+          key: "vault-token"
+```
+
+**NOTA:** No caso de um **ClusterSecretStore**, certifique-se de fornecer o **namespace** em **tokenSecretRef** com o namespace em que o segredo reside.
+
+
+Exemplo de autenticação AppRole
+---------------------------
+
+A autenticação AppRole lê o id secreto de um **Kind=Secret** e usa o **roleId** especificado para adquirir um token temporário para buscar segredos.
+```ruby
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: vault-backend
+  namespace: example
+spec:
+  provider:
+    vault:
+      server: "https://vault.acme.org"
+      path: "secret"
+      version: "v2"
+      auth:
+        # VaultAppRole authenticates with Vault using the
+        # App Role auth mechanism
+        # https://www.vaultproject.io/docs/auth/approle
+        appRole:
+          # Path where the App Role authentication backend is mounted
+          path: "approle"
+          # RoleID configured in the App Role authentication backend
+          roleId: "db02de05-fa39-4855-059b-67221c5c2f63"
+          # Reference to a key in a K8 Secret that contains the App Role SecretId
+          secretRef:
+            name: "my-secret"
+            key: "secret-id"
+```
+**NOTA**: No caso de um **ClusterSecretStore**, certifique-se de fornecer **namespace** em **secretRef** com o namespace onde o segredo reside.
+
+
+Autenticação do Kubernetes
+------------------------
+
+**A autenticação nativa do Kubernetes** tem três opções de obtenção de credenciais para cofre:
+
+>1.usando uma conta de serviço jwt referenciada em **serviceAccountRef**
+>
+>2.usando o jwt de um **Kind=Secret** referenciado pelo **secretRef**
+>
+>3.usando credenciais transitórias do token da conta de serviço montada no operador de segredos externos
+
+```ruby
+apiVersion: external-secrets.io/v1beta1
+kind: SecretStore
+metadata:
+  name: vault-backend
+  namespace: example
+spec:
+  provider:
+    vault:
+      server: "https://vault.acme.org"
+      path: "secret"
+      version: "v2"
+      auth:
+        # Authenticate against Vault using a Kubernetes ServiceAccount
+        # token stored in a Secret.
+        # https://www.vaultproject.io/docs/auth/kubernetes
+        kubernetes:
+          # Path where the Kubernetes authentication backend is mounted in Vault
+          mountPath: "kubernetes"
+          # A required field containing the Vault Role to assume.
+          role: "demo"
+          # Optional service account field containing the name
+          # of a kubernetes ServiceAccount
+          serviceAccountRef:
+            name: "my-sa"
+          # Optional secret field containing a Kubernetes ServiceAccount JWT
+          #  used for authenticating with Vault
+          secretRef:
+            name: "my-secret"
+            key: "vault"
+```
+**NOTA**: No caso de um **ClusterSecretStore**, certifique-se de fornecer o **namespace** em **serviceAccountRef** ou em **secretRef**, se usado.
+
+Autenticação LDAP
+-------------------
 
 
 
