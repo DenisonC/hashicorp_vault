@@ -190,6 +190,89 @@ Você pode extrair vários segredos do cofre da Hashicorp usando **dataFrom.Find
 
 Atualmente, **dataFrom.Find** permite que os usuários busquem nomes secretos que correspondam a um determinado padrão regexp ou busquem segredos cujas tags **custom_metadata** correspondam a um conjunto predefinido.
 
+>**Atenção**
+
+>A forma como o hashicorp Vault atualmente permite operações LIST é através da existência de um metadado secreto. Se você excluir o segredo, também >precisará excluir os metadados do segredo ou isso fará com que as operações de localização falhem.
+
+Dado o seguinte segredo - assuma que seu caminho é **/dev/config**:
+```ruby
+{
+  "foo": {
+    "nested": {
+      "bar": "mysecret",
+      "baz": "bang"
+    }
+  }
+}
+```
+Considere também que o segredo a seguir possui os seguintes **custom_metadata**:
+```ruby
+{
+  "environment": "dev",
+  "component": "app-1"
+}
+```
+É possível encontrar este segredo por todas as seguintes possibilidades:
+```ruby
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: vault-example
+spec:
+  # ...
+  dataFrom:
+  - find: #will return every secret with 'dev' in it (including paths)
+      name:
+        regexp: dev
+  - find: #will return every secret matching environment:dev tags from dev/ folder and beyond
+      tags:
+        environment: dev
+```
+Irá gerar um segredo com:
+```ruby
+{
+  "dev_config":"{\"foo\":{\"nested\":{\"bar\":\"mysecret\",\"baz\":\"bang\"}}}"
+}
+```
+Atualmente, as operações de **localização** são recursivas em uma determinada pasta do cofre, começando na definição do **provider.path**. Recomenda-se restringir o escopo da pesquisa definindo uma variável **find.path**. Isso também é útil para reduzir automaticamente os nomes de chaves secretas resultantes:
+```ruby
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: vault-example
+spec:
+  # ...
+  dataFrom:
+  - find: #will return every secret from dev/ folder
+      path: dev
+      name:
+        regexp: ".*"
+  - find: #will return every secret matching environment:dev tags from dev/ folder
+      path: dev
+      tags:
+        environment: dev
+```
+Irá gerar um segredo com:
+```ruby
+{
+  "config":"{\"foo\": {\"nested\": {\"bar\": \"mysecret\",\"baz\": \"bang\"}}}"
+}
+```
+Autenticação
+---------------
+Oferecemos suporte a cinco modos diferentes de autenticação: **baseado em token, appRole, kubernetes-native, ldap e jwt/oidc**, cada um com suas próprias compensações. Dependendo do método de autenticação, você precisa adaptar seu ambiente.
+
+Autenticação baseada em token
+----------------------------
+
+
+
+
+
+
+
+
+
 
 
 
